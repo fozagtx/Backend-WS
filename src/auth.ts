@@ -1,51 +1,372 @@
 import express from "express";
-const bcrypt = require("bcryptjs");
-import { User } from "./model";
-import { successProcessor } from "zod/v4/core/json-schema-processors";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
+import { User, Class, Attendance } from "./model";
+import { signToken, verifyToken } from "./jwt";
 
 const router = express.Router();
 
+// Zod schema for auth
+const authSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  password: z.string().min(6),
+  role: z.enum(["teacher", "student"]),
+});
+
+// Middleware to verify JWT token
+const authenticate = (req: any, res: any, next: any) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "No token provided",
+      });
+    }
+
+    const decoded = verifyToken(token) as any;
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired token",
+    });
+  }
+};
+
+// Get current user profile
+router.get("/me", authenticate, async (req: any, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select("-password");
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
+});
+
+// Create a new class (teacher only)
+router.post("/class", authenticate, async (req: any, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({
+        success: false,
+        error: "Only teachers can create classes",
+      });
+    }
+
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        error: "Class name is required",
+      });
+    }
+
+    const newClass = new Class({
+      name,
+      teacherId: req.user.userId,
+      students: [],
+    });
+
+    await newClass.save();
+
+    return res.status(201).json({
+      success: true,
+      data: newClass,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
+});
+
+// Add student to class (teacher only)
+router.post("/class/:id/add-student", authenticate, async (req: any, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({
+        success: false,
+        error: "Only teachers can add students",
+      });
+    }
+
+    const { studentId } = req.body;
+    const classId = req.params.id;
+
+    const classDoc = await Class.findById(classId);
+    if (!classDoc) {
+      return res.status(404).json({
+        success: false,
+        error: "Class not found",
+      });
+    }
+
+    if (classDoc.teacherId.toString() !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        error: "You can only add students to your own classes",
+      });
+    }
+
+    const student = await User.findById(studentId);
+    if (!student || student.role !== "student") {
+      return res.status(404).json({
+        success: false,
+        error: "Student not found",
+      });
+    }
+
+    if (classDoc.students.includes(studentId)) {
+      return res.status(400).json({
+        success: false,
+        error: "Student already in class",
+      });
+    }
+
+    classDoc.students.push(studentId);
+    await classDoc.save();
+
+    return res.status(200).json({
+      success: true,
+      data: classDoc,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
+});
+
+// Get class details
+router.get("/class/:id", authenticate, async (req: any, res) => {
+  try {
+    const classDoc = await Class.findById(req.params.id)
+      .populate("teacherId", "name email")
+      .populate("students", "name email");
+
+    if (!classDoc) {
+      return res.status(404).json({
+        success: false,
+        error: "Class not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: classDoc,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
+});
+
+// Get all students (teacher only)
+router.get("/students", authenticate, async (req: any, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({
+        success: false,
+        error: "Only teachers can view all students",
+      });
+    }
+
+    const students = await User.find({ role: "student" }).select("-password");
+
+    return res.status(200).json({
+      success: true,
+      data: students,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
+});
+
+// Get student's attendance for a class
+router.get("/class/:id/my-attendance", authenticate, async (req: any, res) => {
+  try {
+    if (req.user.role !== "student") {
+      return res.status(403).json({
+        success: false,
+        error: "Only students can view their attendance",
+      });
+    }
+
+    const attendance = await Attendance.find({
+      classId: req.params.id,
+      studentId: req.user.userId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: attendance,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
+});
+
+// Start attendance session (teacher only)
+router.post("/attendance/start", authenticate, async (req: any, res) => {
+  try {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({
+        success: false,
+        error: "Only teachers can start attendance",
+      });
+    }
+
+    const { classId } = req.body;
+
+    const classDoc = await Class.findById(classId);
+    if (!classDoc) {
+      return res.status(404).json({
+        success: false,
+        error: "Class not found",
+      });
+    }
+
+    if (classDoc.teacherId.toString() !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        error: "You can only start attendance for your own classes",
+      });
+    }
+
+    // Create attendance records for all students (default: absent)
+    const attendanceRecords = classDoc.students.map((studentId) => ({
+      classId,
+      studentId,
+      status: "absent",
+    }));
+
+    const created = await Attendance.insertMany(attendanceRecords);
+
+    return res.status(201).json({
+      success: true,
+      data: created,
+      message: "Attendance session started",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
+});
+
+// Signup
+router.post("/signup", async (req, res) => {
+  try {
+    const parsed = authSchema.parse(req.body);
+    const existingUser = await User.findOne({ email: parsed.email });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        error: "Email already in use",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(parsed.password, 10);
+    const user = new User({
+      name: parsed.name,
+      email: parsed.email,
+      password: hashedPassword,
+      role: parsed.role,
+    });
+    await user.save();
+
+    const token = signToken({ userId: user._id.toString(), role: user.role });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        token,
+      },
+    });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Invalid input",
+    });
+  }
+});
+
+// Login
 router.post("/login", async (req, res) => {
-	try {
-		const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: "Email and password are required",
+      });
+    }
 
-		if (!email || !password) {
-			return res.status(400).json({
-				success: false,
-				error: "Email and password are required",
-			});
-		}
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid credentials",
+      });
+    }
 
-		const user = await User.findOne({ email });
-		if (!user) {
-			return res.status(401).json({
-				success: false,
-				error: "Invalid credentials",
-			});
-		}
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid credentials",
+      });
+    }
 
-		const isMatch = await bcrypt.compare(password, user.password);
-		if (!isMatch) {
-			return res.status(401).json({
-				success: false,
-				error: "Invalid credentials",
-			});
-		}
+    const token = signToken({ userId: user._id.toString(), role: user.role });
 
-		return res.status(200).json({
-			success: true,
-			data: {
-				id: user._id,
-				email: user.email,
-				role: user.role,
-			},
-		});
-	} catch (err) {
-		return res.status(500).json({
-			success: false,
-			error: err instanceof Error ? err.message : "Internal server error",
-		});
-	}
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        token,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : "Internal server error",
+    });
+  }
 });
 
 export default router;

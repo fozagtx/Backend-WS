@@ -1,21 +1,18 @@
 import jwt from "jsonwebtoken";
 import { jwtSecret } from "./config";
 
-const token = jwt.sign({ data: "student" }, jwtSecret, { expiresIn: "1hr" });
-
-export function decode() {
-	try {
-		const decoded = jwt.decode(token);
-		console.log(token);
-	} catch (err) {
-		err: "error decoding";
-	}
+export function signToken(payload: { userId: string; role: string }) {
+  return jwt.sign(payload, jwtSecret, { expiresIn: "1h" });
 }
-export function verify() {
-	try {
-		const verified = jwt.verify(token, jwtSecret);
-		console.log(verified);
-	} catch (err) {
-		err: "cannot verify";
-	}
+
+export function decodeToken(token: string) {
+  return jwt.decode(token);
+}
+
+export function verifyToken(token: string) {
+  try {
+    return jwt.verify(token, jwtSecret);
+  } catch {
+    throw new Error("Invalid or expired token");
+  }
 }

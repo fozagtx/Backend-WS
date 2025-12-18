@@ -1,8 +1,23 @@
 import express from "express";
+import mongoose from "mongoose";
+import router from "./auth";
+import { mongoUri, port } from "./config";
 
-const app: express.Application = express();
-const port: number = 3000;
+const app = express();
 
-app.listen(port, () => {
-	console.log(`TypeScript with Express          http://localhost:${port}/`);
-});
+app.use(express.json());
+app.use("/auth", router);
+
+async function main() {
+  try {
+    await mongoose.connect(mongoUri);
+    console.log("MongoDB connected");
+    app.listen(port, () => {
+      console.log(`Server running on http://localhost:${port}`);
+    });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+main();
