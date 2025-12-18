@@ -5,6 +5,18 @@
 **Tech Stack:** Node.js, Express, MongoDB, Mongoose, Zod, JWT, bcrypt, `ws` (WebSocket)
 
 ---
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   LOGIN     │     │   SERVER    │     │   CLIENT    │
+│             │────▶│ Creates     │────▶│ Stores      │
+│ email/pass  │     │ JWT token   │     │ token       │
+└─────────────┘     └─────────────┘     └─────────────┘
+                                               │
+                                               ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   SERVER    │◀────│   REQUEST   │◀────│   CLIENT    │
+│ Verifies    │     │ Authorization:    │ Sends token │
+│ token       │     │ Bearer <token>    │ in header   │
+└─────────────┘     └─────────────┘     └─────────────┘
 
 ## Overview
 
@@ -727,3 +739,4 @@ When a client connects:
   }
 }
 ```
+
