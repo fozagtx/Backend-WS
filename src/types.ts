@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import type { Request, Response, NextFunction } from "express";
 
 export type UserRole = "teacher" | "student";
 
@@ -22,3 +23,19 @@ export interface IClass {
   teacherId: Types.ObjectId;
   students: Types.ObjectId[];
 }
+
+// Authentication types
+export interface AuthUser {
+  userId: string;
+  role: UserRole;
+}
+
+export interface AuthRequest extends Request {
+  user: AuthUser;
+}
+
+export type AuthRequestHandler = (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => Promise<void | Response> | void | Response;
