@@ -1,17 +1,18 @@
 import jwt from "jsonwebtoken";
 import { jwtSecret } from "./config";
 
-export function signToken(payload: { userId: string; role: string }) {
+export interface JwtPayload {
+  userId: string;
+  role: "teacher" | "student";
+}
+
+export function signToken(payload: JwtPayload) {
   return jwt.sign(payload, jwtSecret, { expiresIn: "1h" });
 }
 
-export function decodeToken(token: string) {
-  return jwt.decode(token);
-}
-
-export function verifyToken(token: string) {
+export function verifyToken(token: string): JwtPayload {
   try {
-    return jwt.verify(token, jwtSecret);
+    return jwt.verify(token, jwtSecret) as JwtPayload;
   } catch {
     throw new Error("Invalid or expired token");
   }
